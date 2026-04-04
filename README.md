@@ -1,4 +1,4 @@
- * 1、点播订阅来自 潇洒本地包：https://github.com/PizazzGY   直播订阅来自Stymei： https://github.com/Jsnzkpg/Jsnzkpg
+ * 1. 点播订阅来自 潇洒本地包：https://github.com/PizazzGY   直播订阅来自Stymei： https://github.com/Jsnzkpg/Jsnzkpg
  * 2. 仅支持openwrt X86，Arm版本可以丢给Ai修改。
  * 3. 上传到/root，执行sh tv.sh  ，按向导填写部署参数，支持对外服务。
  * 4. 默认端口7799，默认同步时间：凌晨1点、下午17点，每天同步两次。
