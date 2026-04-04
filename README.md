@@ -5,5 +5,4 @@
  * 5. 部署完成访问:  http:\\你的路由器IP:端口  ，查看订阅地址。
  * 6. 在OK影视、TvBox等等盒子软件类上填写对应订阅，这样以后无需再手动更新订阅。
   
-   7. 
 <img width="650" height="620" alt="image" src="https://github.com/user-attachments/assets/104daef4-99cc-4416-8c7b-7686273cc7a3" />
