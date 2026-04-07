@@ -1,4 +1,8 @@
-
+查看计划任务：
+cat /etc/crontabs/tvboxosc
+ls -l /etc/crontabs/
+crontab -l
+ps | grep crond
 
 路径对照
 直播文件：/opt/tv.m3u。
