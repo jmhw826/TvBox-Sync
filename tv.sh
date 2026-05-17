@@ -22,7 +22,7 @@ SYNC_LOG="/var/log/osc_sync.log"
 
 FIREWALL_NOTE="仅在选择开放 WAN 时创建端口转发规则"
 LIVE_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg1.m3u'
-VOD_URL='https://raw.githubusercontent.com/PizazzGY/NewTVBox/main/%E5%8D%95%E7%BA%BF%E8%B7%AF.zip'
+VOD_URL='https://raw.githubusercontent.com/PizazzGY/NewTVBox/refs/heads/main/local/%E5%8D%95%E7%BA%BF%E8%B7%AF.zip'
 DEFAULT_PORT="7799"
 DEFAULT_HOURS="1 17"
 DEFAULT_WAN_OPEN="n"
