@@ -1,14 +1,13 @@
 #!/bin/sh
-# TVBoxOSC_v2_secured.sh
-# 安全修复：防误杀改名/cron移植/ZipSlip/HTTPS强制/大小上限/脚本权限/修复端口判断死结
-set -eu
+# TVBoxOSC_v5_Independent.sh
+# 极简独立版：直播与点播双轨解绑，互不影响，一方失败不会阻断另一方
+set -u
 
 echo "================================================================"
-echo "                   📺 盒子订阅同步服务 "
+echo "                   📺 盒子订阅同步服务 (双轨独立更新版) "
 echo "================================================================"
 echo ""
 
-# 将名字改为 osc_vod
 SERVICE_NAME="osc_vod"
 SERVE_DIR="/opt"
 PACKAGE_DIR_NAME="TVBoxOSC"
@@ -21,8 +20,10 @@ SYNC_SCRIPT="/opt/osc_sync.sh"
 SYNC_LOG="/var/log/osc_sync.log"
 
 FIREWALL_NOTE="仅在选择开放 WAN 时创建端口转发规则"
+# 最新双线直连源
 LIVE_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg1.m3u'
-VOD_URL='https://raw.githubusercontent.com/PizazzGY/NewTVBox/refs/heads/main/local/%E5%8D%95%E7%BA%BF%E8%B7%AF.zip'
+VOD_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg2'
+
 DEFAULT_PORT="7799"
 DEFAULT_HOURS="1 17"
 DEFAULT_WAN_OPEN="n"
@@ -60,21 +61,6 @@ ask_wan_open() {
     case "$WAN_OPEN" in y|Y) WAN_OPEN='y' ;; n|N) WAN_OPEN='n' ;; *) fail "请输入 y 或 n" ;; esac
 }
 
-install_unzip_if_needed() {
-    if command -v unzip >/dev/null 2>&1; then
-        return 0
-    fi
-    info "未检测到 unzip，尝试安装..."
-    if command -v opkg >/dev/null 2>&1; then
-        opkg update >/dev/null 2>&1 || true
-        opkg install unzip >/dev/null 2>&1 || fail "安装 unzip 失败，请手动安装 unzip"
-    elif command -v apk >/dev/null 2>&1; then
-        apk add unzip >/dev/null 2>&1 || fail "安装 unzip 失败，请手动安装 unzip"
-    else
-        fail "系统没有 unzip，也没有可用包管理器安装它"
-    fi
-}
-
 check_port_conflict() {
     if uci show uhttpd 2>/dev/null | grep -v "^uhttpd\.${SERVICE_NAME}\." | grep -v "^uhttpd\.tvboxosc\." | awk -F= -v p="$PORT" '
         /listen_http=/ {
@@ -91,7 +77,6 @@ check_port_conflict() {
 cleanup_old_service() {
     info "清理历史服务配置，释放端口..."
     uci -q delete uhttpd.$SERVICE_NAME || true
-    # 防呆：把之前可能残留的 tvboxosc 也清理干净
     uci -q delete uhttpd.tvboxosc || true
     uci commit uhttpd >/dev/null 2>&1 || true
     
@@ -99,7 +84,6 @@ cleanup_old_service() {
     uci -q delete firewall.tvboxosc || true
     uci commit firewall >/dev/null 2>&1 || true
     
-    # 标准 crontab 过滤清理，安全可靠
     crontab -l 2>/dev/null | grep -v "$SERVICE_NAME" | grep -v "$SYNC_SCRIPT" | grep -v "tvboxosc_sync.sh" > /tmp/_cron || true
     crontab /tmp/_cron 2>/dev/null || true
     rm -f /tmp/_cron
@@ -124,17 +108,12 @@ fetch_file() {
     fi
 }
 
-check_vod_content() {
-    dir="$1"
-    [ -f "$dir/$PACKAGE_DIR_NAME/tvbox/api.json" ]
-}
-
 write_index() {
     cat > "$INDEX_FILE" <<EOF
 <!doctype html>
-<html><head><meta charset="utf-8"><title>tvboxosc</title></head>
+<html><head><meta charset="utf-8"><title>osc_vod</title></head>
 <body>
-<h2>tvboxosc 已部署</h2>
+<h2>osc_vod 双轨极简版已部署</h2>
 <p>直播订阅：<a id="live_link" href="/tv.m3u">/tv.m3u</a></p>
 <p>点播订阅：<a id="vod_link" href="/$API_REL_PATH">/$API_REL_PATH</a></p>
 <noscript>
@@ -158,6 +137,7 @@ EOF
 
 prepare_dirs() {
     mkdir -p "$SERVE_DIR"
+    mkdir -p "$SERVE_DIR/$PACKAGE_DIR_NAME/tvbox"
     write_index
     if ! touch "$SYNC_LOG" 2>/dev/null; then
         info "日志文件预创建失败，后续将依赖 cron 重定向自动生成：$SYNC_LOG"
@@ -168,45 +148,25 @@ sync_subscriptions() {
     TMP_DIR="$(mktemp -d /tmp/tvboxosc.XXXXXX)"
     trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 
+    # 独立模块 1：直播拉取
     info "拉取直播订阅..."
-    fetch_file "$LIVE_URL" "$TMP_DIR/live.m3u"
-    [ -s "$TMP_DIR/live.m3u" ] || fail "直播订阅下载为空"
-    _m3u_size=$(wc -c < "$TMP_DIR/live.m3u")
-    [ "$_m3u_size" -le 52428800 ] || fail "直播 m3u 文件过大（超过50MB），疑似异常"
-    grep -Eq '^#EXTM3U|https?://' "$TMP_DIR/live.m3u" || fail "直播订阅内容疑似无效"
-
-    info "拉取点播订阅 ZIP..."
-    fetch_file "$VOD_URL" "$TMP_DIR/vod.zip"
-    [ -s "$TMP_DIR/vod.zip" ] || fail "点播订阅 ZIP 下载为空"
-    _zip_size=$(wc -c < "$TMP_DIR/vod.zip")
-    [ "$_zip_size" -le 209715200 ] || fail "点播 ZIP 文件过大（超过200MB），疑似异常"
-    unzip -tq "$TMP_DIR/vod.zip" >/dev/null 2>&1 || fail "点播订阅 ZIP 完整性校验失败"
-
-    info "解压点播订阅..."
-    mkdir -p "$TMP_DIR/vod"
-    unzip -oq "$TMP_DIR/vod.zip" -d "$TMP_DIR/vod" || fail "点播订阅解压失败"
-    
-    if command -v realpath >/dev/null 2>&1; then
-        ESCAPED=$(find "$TMP_DIR/vod" -name "*" | while read -r f; do
-            rp=$(realpath "$f" 2>/dev/null)
-            case "$rp" in "$TMP_DIR"/*) ;; *) echo "$rp" ;; esac
-        done)
-        [ -z "$ESCAPED" ] || fail "ZIP 路径穿越攻击检测：$ESCAPED"
+    if fetch_file "$LIVE_URL" "$TMP_DIR/live.m3u" && [ -s "$TMP_DIR/live.m3u" ] && grep -Eq '^#EXTM3U|https?://' "$TMP_DIR/live.m3u"; then
+        cp "$TMP_DIR/live.m3u" "$LIVE_FILE"
+        info "直播订阅更新成功"
+    else
+        echo "[WARNING] 直播源拉取或校验失败，继续保留旧版直播数据" >&2
     fi
-    check_vod_content "$TMP_DIR/vod" || fail "点播主文件缺失：$PACKAGE_DIR_NAME/tvbox/api.json"
 
-    info "写入本地文件..."
-    rm -rf "/opt/${PACKAGE_DIR_NAME}.new" "/opt/${PACKAGE_DIR_NAME}.old"
-    mkdir -p "/opt/${PACKAGE_DIR_NAME}.new"
-    cp -a "$TMP_DIR/vod/$PACKAGE_DIR_NAME/." "/opt/${PACKAGE_DIR_NAME}.new/"
-    [ ! -d "$PACKAGE_DIR" ] || mv "$PACKAGE_DIR" "/opt/${PACKAGE_DIR_NAME}.old"
-    mv "/opt/${PACKAGE_DIR_NAME}.new" "$PACKAGE_DIR" || { [ ! -d "/opt/${PACKAGE_DIR_NAME}.old" ] || mv "/opt/${PACKAGE_DIR_NAME}.old" "$PACKAGE_DIR"; fail "点播目录切换失败"; }
-    rm -rf "/opt/${PACKAGE_DIR_NAME}.old"
-    cp "$TMP_DIR/live.m3u" "$LIVE_FILE"
-    [ -f "$API_FILE" ] || fail "正式目录缺少点播主文件：$API_REL_PATH"
+    # 独立模块 2：点播拉取
+    info "拉取点播订阅..."
+    if fetch_file "$VOD_URL" "$TMP_DIR/api.json" && [ -s "$TMP_DIR/api.json" ]; then
+        cp "$TMP_DIR/api.json" "$API_FILE"
+        info "点播订阅更新成功"
+    else
+        echo "[WARNING] 点播源拉取失败，继续保留旧版点播数据" >&2
+    fi
+    
     write_index
-    info "点播主文件检测成功：$API_FILE"
-
     rm -rf "$TMP_DIR"
     trap - EXIT INT TERM
 }
@@ -266,7 +226,7 @@ setup_cron() {
 write_sync_script() {
     cat > "$SYNC_SCRIPT" <<'EOF'
 #!/bin/sh
-set -eu
+set -u
 
 exec >> "/var/log/osc_sync.log" 2>&1
 
@@ -277,8 +237,10 @@ LIVE_FILE="$SERVE_DIR/tv.m3u"
 API_REL_PATH="$PACKAGE_DIR_NAME/tvbox/api.json"
 API_FILE="$SERVE_DIR/$API_REL_PATH"
 INDEX_FILE="$SERVE_DIR/index.html"
+
 LIVE_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg1.m3u'
-VOD_URL='https://raw.githubusercontent.com/PizazzGY/NewTVBox/main/%E5%8D%95%E7%BA%BF%E8%B7%AF.zip'
+VOD_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg2'
+
 info() { echo "[INFO] $*"; }
 fetch_file() {
     url="$1"
@@ -292,70 +254,33 @@ fetch_file() {
         wget --timeout=300 --tries=1 -O "$out" "$url"
     fi
 }
-check_vod_content() {
-    dir="$1"
-    [ -f "$dir/$PACKAGE_DIR_NAME/tvbox/api.json" ]
-}
-write_index() {
-    cat > "$INDEX_FILE" <<EOT
-<!doctype html>
-<html><head><meta charset="utf-8"><title>tvboxosc</title></head>
-<body>
-<h2>tvboxosc 已部署</h2>
-<p>直播订阅：<a id="live_link" href="/tv.m3u">/tv.m3u</a></p>
-<p>点播订阅：<a id="vod_link" href="/$API_REL_PATH">/$API_REL_PATH</a></p>
-<noscript>
-<p>直播订阅：/tv.m3u</p>
-<p>点播订阅：/$API_REL_PATH</p>
-</noscript>
-<script>
-(function(){
-  var base = window.location.protocol + '//' + window.location.host;
-  var live = base + '/tv.m3u';
-  var vod = base + '/$API_REL_PATH';
-  var a = document.getElementById('live_link');
-  var b = document.getElementById('vod_link');
-  a.href = live; a.textContent = live;
-  b.href = vod; b.textContent = vod;
-})();
-</script>
-</body></html>
-EOT
-}
+
 echo "================================================="
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务开始: 同步 TVBox 数据"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务开始: 同步极简版 TVBox 数据"
 TMP_DIR="$(mktemp -d /tmp/tvboxosc.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
-fetch_file "$LIVE_URL" "$TMP_DIR/live.m3u"
-[ -s "$TMP_DIR/live.m3u" ] || { echo '[ERROR] 直播订阅下载为空'; exit 1; }
-    _m3u_size=$(wc -c < "$TMP_DIR/live.m3u"); [ "$_m3u_size" -le 52428800 ] || { echo '[ERROR] m3u文件过大（超50MB），疑似异常'; exit 1; }
-grep -Eq '^#EXTM3U|https?://' "$TMP_DIR/live.m3u" || { echo '[ERROR] 直播订阅内容疑似无效'; exit 1; }
-fetch_file "$VOD_URL" "$TMP_DIR/vod.zip"
-[ -s "$TMP_DIR/vod.zip" ] || { echo '[ERROR] 点播订阅 ZIP 下载为空'; exit 1; }
-    _zip_size=$(wc -c < "$TMP_DIR/vod.zip"); [ "$_zip_size" -le 209715200 ] || { echo '[ERROR] ZIP文件过大（超200MB），疑似zip bomb'; exit 1; }
-unzip -tq "$TMP_DIR/vod.zip" >/dev/null 2>&1 || { echo '[ERROR] 点播订阅 ZIP 完整性校验失败'; exit 1; }
-mkdir -p "$TMP_DIR/vod"
-unzip -oq "$TMP_DIR/vod.zip" -d "$TMP_DIR/vod" || { echo '[ERROR] 点播订阅解压失败'; exit 1; }
 
-if command -v realpath >/dev/null 2>&1; then
-    ESCAPED=$(find "$TMP_DIR/vod" -name "*" | while read -r f; do
-        rp=$(realpath "$f" 2>/dev/null)
-        case "$rp" in "$TMP_DIR"/*) ;; *) echo "$rp" ;; esac
-    done)
-    [ -z "$ESCAPED" ] || { echo "[ERROR] ZIP路径穿越攻击: $ESCAPED"; exit 1; }
+mkdir -p "$SERVE_DIR/$PACKAGE_DIR_NAME/tvbox"
+
+# 独立拉取：直播源
+if fetch_file "$LIVE_URL" "$TMP_DIR/live.m3u" && [ -s "$TMP_DIR/live.m3u" ] && grep -Eq '^#EXTM3U|https?://' "$TMP_DIR/live.m3u"; then
+    cp "$TMP_DIR/live.m3u" "$LIVE_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] 直播订阅更新成功"
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] 直播源拉取或校验失败，保留旧版数据"
 fi
-check_vod_content "$TMP_DIR/vod" || { echo '[ERROR] 点播主文件缺失：TVBoxOSC/tvbox/api.json'; exit 1; }
-rm -rf "/opt/${PACKAGE_DIR_NAME}.new" "/opt/${PACKAGE_DIR_NAME}.old"
-mkdir -p "/opt/${PACKAGE_DIR_NAME}.new"
-cp -a "$TMP_DIR/vod/$PACKAGE_DIR_NAME/." "/opt/${PACKAGE_DIR_NAME}.new/"
-[ ! -d "$PACKAGE_DIR" ] || mv "$PACKAGE_DIR" "/opt/${PACKAGE_DIR_NAME}.old"
-mv "/opt/${PACKAGE_DIR_NAME}.new" "$PACKAGE_DIR" || { [ ! -d "/opt/${PACKAGE_DIR_NAME}.old" ] || mv "/opt/${PACKAGE_DIR_NAME}.old" "$PACKAGE_DIR"; echo '[ERROR] 点播目录切换失败'; exit 1; }
-rm -rf "/opt/${PACKAGE_DIR_NAME}.old"
-cp "$TMP_DIR/live.m3u" "$LIVE_FILE"
-[ -f "$API_FILE" ] || { echo '[ERROR] 正式目录缺少点播主文件'; exit 1; }
-write_index
-info "点播主文件检测成功：$API_FILE"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务结束: 成功更新并替换数据"
+
+# 独立拉取：点播源
+if fetch_file "$VOD_URL" "$TMP_DIR/api.json" && [ -s "$TMP_DIR/api.json" ]; then
+    cp "$TMP_DIR/api.json" "$API_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] 点播订阅更新成功"
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] 点播源拉取失败，保留旧版数据"
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务结束: 双轨更新流程执行完毕"
+rm -rf "$TMP_DIR"
+trap - EXIT INT TERM
 EOF
     chmod 755 "$SYNC_SCRIPT"
 }
@@ -365,13 +290,9 @@ show_result() {
     echo
     echo "部署完成"
     echo "服务名称: $SERVICE_NAME"
-    echo "服务根目录: $SERVE_DIR"
-    echo "点播目录: $PACKAGE_DIR"
     echo "访问端口: $PORT"
     echo "同步时间: $HOURS"
-    echo "WAN开放: $WAN_OPEN"
     echo "同步日志: $SYNC_LOG"
-    echo "防火墙说明: $FIREWALL_NOTE"
     echo "直播订阅: http://$LAN_IP:$PORT/tv.m3u"
     echo "点播订阅: http://$LAN_IP:$PORT/$API_REL_PATH"
     echo
@@ -387,12 +308,11 @@ main() {
     need_cmd mkdir
     need_cmd xargs
     command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || fail "需要 curl 或 wget"
+    
     ask_port
     ask_hours
     ask_wan_open
-    install_unzip_if_needed
 
-    # 【调换执行顺序】先清理自己的旧配置并释放端口，然后再去检查这个端口有没有被“别的服务”占用
     cleanup_old_service
     check_port_conflict
     
@@ -409,5 +329,5 @@ main "$@"
 
 echo ""
 echo "================================================================"
-echo "               📺 盒子订阅同步服务 部署完成！"
+echo "               📺 盒子订阅同步服务 (极简双轨版) 部署完成！"
 echo "================================================================"
