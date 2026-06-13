@@ -160,8 +160,14 @@ sync_subscriptions() {
     # 独立模块 2：点播拉取
     info "拉取点播订阅..."
     if fetch_file "$VOD_URL" "$TMP_DIR/api.json" && [ -s "$TMP_DIR/api.json" ]; then
+        
+        # 🌟 智能魔法：自动截取当前 VOD_URL 的基础目录路径
+        BASE_URL="${VOD_URL%/*}/"
+        # 🌟 动态替换：把所有的 "./" 自动替换成提取出的真实绝对路径
+        sed -i "s#\"\./#\"$BASE_URL#g" "$TMP_DIR/api.json"
+        
         cp "$TMP_DIR/api.json" "$API_FILE"
-        info "点播订阅更新成功"
+        info "点播订阅更新成功(已动态修复相对路径)"
     else
         echo "[WARNING] 点播源拉取失败，继续保留旧版点播数据" >&2
     fi
@@ -239,7 +245,7 @@ API_FILE="$SERVE_DIR/$API_REL_PATH"
 INDEX_FILE="$SERVE_DIR/index.html"
 
 LIVE_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg1.m3u'
-VOD_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg2'
+VOD_URL='https://qist.wyfc.qzz.io/xiaosa/api.json'
 
 info() { echo "[INFO] $*"; }
 fetch_file() {
@@ -272,8 +278,14 @@ fi
 
 # 独立拉取：点播源
 if fetch_file "$VOD_URL" "$TMP_DIR/api.json" && [ -s "$TMP_DIR/api.json" ]; then
+    
+    # 🌟 智能魔法：自动截取当前 VOD_URL 的基础目录路径
+    BASE_URL="${VOD_URL%/*}/"
+    # 🌟 动态替换：把所有的 "./" 自动替换成提取出的真实绝对路径
+    sed -i "s#\"\./#\"$BASE_URL#g" "$TMP_DIR/api.json"
+    
     cp "$TMP_DIR/api.json" "$API_FILE"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] 点播订阅更新成功"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] 点播订阅更新成功(已动态修复相对路径)"
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] 点播源拉取失败，保留旧版数据"
 fi
