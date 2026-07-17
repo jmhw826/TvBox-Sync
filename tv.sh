@@ -21,8 +21,8 @@ SYNC_LOG="/var/log/osc_sync.log"
 
 FIREWALL_NOTE="仅在选择开放 WAN 时创建端口转发规则"
 # 最新双线直连源
-LIVE_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg1.m3u'
-VOD_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg2'
+LIVE_URL='https://live.445569.xyz/live.m3u'
+VOD_URL='https://codeberg.org/Jsnzkpg/Jsnzkpg/raw/branch/Jsnzkpg/Jsnzkpg'
 
 DEFAULT_PORT="7799"
 DEFAULT_HOURS="1 17"
